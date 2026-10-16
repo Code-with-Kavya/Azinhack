@@ -126,23 +126,13 @@ async def apply_to_scheme(
             output_schema = {
                 "type": "object",
                 "properties": {
-                    "status": {
-                        "type": "string",
-                        "description": "Status of the dry run (e.g. dry_run_completed, form_filled)",
-                    },
-                    "screenshot_url": {
-                        "type": "string",
-                        "description": "URL or capture of the full-page form screenshot",
-                    },
+                    "status": {"type": "string"},
+                    "screenshot_url": {"type": "string"},
                     "fields_filled": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Names of form fields successfully filled",
                     },
-                    "form_url": {
-                        "type": "string",
-                        "description": "URL where the application form was located",
-                    },
+                    "form_url": {"type": "string"},
                 },
                 "required": ["status"],
             }
@@ -150,32 +140,25 @@ async def apply_to_scheme(
             output_schema = {
                 "type": "object",
                 "properties": {
-                    "confirmation_id": {
-                        "type": "string",
-                        "description": "Application reference number or confirmation ID from portal",
-                    },
-                    "status": {
-                        "type": "string",
-                        "description": "Final submission status (e.g. submitted, successful, pending_verification)",
-                    },
-                    "message": {
-                        "type": "string",
-                        "description": "Acknowledgement or summary message from the portal",
-                    },
+                    "confirmation_id": {"type": "string"},
+                    "status": {"type": "string"},
+                    "message": {"type": "string"},
                 },
                 "required": ["status"],
             }
-
         logger.info(
             f"Invoking TinyFish agent [mode={mode_str}] for profile #{profile.id} on scheme #{scheme.id} ({scheme.name})..."
         )
 
         # Run synchronous SDK call in thread pool to prevent blocking async event loop
-        run_response = await asyncio.to_thread(
-            active_client.agent.run,
-            goal=goal,
-            url=scheme.application_url,
-            output_schema=output_schema,
+        run_response = await asyncio.wait_for(
+            asyncio.to_thread(
+                active_client.agent.run,
+                goal=goal,
+                url=scheme.application_url,
+                output_schema=output_schema,
+            ),
+            timeout=120,
         )
 
         if run_response.status == RunStatus.COMPLETED:
@@ -202,6 +185,13 @@ async def apply_to_scheme(
                 "error": str(err_msg),
             }
 
+    except asyncio.TimeoutError:
+        logger.error(f"TinyFish agent timed out after 120s for scheme {scheme.id}")
+        return {
+            "status": "failed",
+            "mode": mode_str,
+            "error": "Agent timed out after 120 seconds. Site may be slow or blocking automation.",
+        }
     except Exception as exc:
         logger.error(f"Error executing TinyFish agent: {exc}")
         return {
